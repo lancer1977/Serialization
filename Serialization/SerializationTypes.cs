@@ -1,4 +1,4 @@
-namespace GCD.Core
+namespace PolyhydraGames.Core.Serialization
 {
     public enum SerializationTypes
     {

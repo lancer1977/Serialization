@@ -1,0 +1,17 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<LangVersion>latest</LangVersion>
+		<Nullable>enable</Nullable>
+		<Title>Serialiozation</Title>
+		<Authors>Dread Breadcrumb</Authors>
+		<Description>A C# wrapper for the RetroAchievement Cheevo rest API</Description>
+		<Copyright>2024</Copyright>
+		<PackageProjectUrl>https://github.com/lancer1977/RetroAchievement_cheevos</PackageProjectUrl>
+		<RepositoryUrl>https://github.com/lancer1977/RetroAchievement_cheevos</RepositoryUrl>
+		<RepositoryType>git</RepositoryType>
+		<PackageId>PolyhydraGames.RetroAchievement.Cheevos</PackageId>
+	</PropertyGroup>
+</Project>

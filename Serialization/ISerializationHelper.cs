@@ -1,6 +1,4 @@
-using System.Threading.Tasks;
-
-namespace GCD.Core
+namespace PolyhydraGames.Core.Serialization
 {
     public interface ISerializationHelper
     {

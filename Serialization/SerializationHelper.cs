@@ -1,316 +1,176 @@
-using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.IO;
-using System.Threading.Tasks;
+// Target: .NET 10
+// Notes:
+// - Uses ConcurrentDictionary for XmlSerializer caching (thread-safe, no manual locks)
+// - Uses injected JsonSerializerOptions (so you can register your converters once)
+// - Keeps "async" APIs via ValueTask wrappers for backward-compat without fake threadpool work
+// - Fixes TryDeserialize semantics (returns false if result is null or exception)
+// - Removes unnecessary `new()` constraints
+
+using System.Collections.Concurrent;
+using System.Text.Json;
 using System.Xml;
 using System.Xml.Serialization;
-using Newtonsoft.Json;
 
-namespace GCD.Core.Serialization
+namespace PolyhydraGames.Core.Serialization;
+
+public interface ISerializationHelper
 {
-    [DebuggerStepThrough]
-    public abstract class InterfacedSingletonBase<T, TI> where T : TI, new() where TI : class
+    ValueTask<T?> DeserializeAsync<T>(string data, SerializationTypes serializationType = SerializationTypes.Json)
+        where T : class;
+
+    T? Deserialize<T>(string data, SerializationTypes serializationType = SerializationTypes.Json)
+        where T : class;
+
+    bool TryDeserialize<T>(string data, SerializationTypes serializationType, out T? result)
+        where T : class;
+
+    ValueTask<string> SerializeAsync(object? obj, SerializationTypes serializationType = SerializationTypes.Json);
+
+    string Serialize(object? obj, SerializationTypes serializationType = SerializationTypes.Json);
+
+    string ToXml(object? obj);
+
+    ValueTask<string> ToXmlAsync(object? obj);
+
+    T? FromXml<T>(string xml) where T : class;
+
+    ValueTask<T?> FromXmlAsync<T>(string xml) where T : class;
+}
+
+public enum SerializationTypes
+{
+    Json,
+    Xml
+}
+
+/// <summary>
+/// Serialization helper for JSON and XML.
+/// Modernized for .NET 10:
+/// - Thread-safe XmlSerializer caching
+/// - Configurable JsonSerializerOptions
+/// - ValueTask wrappers for "async" API compatibility (no fake background threads)
+/// </summary>
+public sealed class SerializationHelper : ISerializationHelper
+{
+    // XmlSerializer is expensive to construct; caching matters.
+    private static readonly ConcurrentDictionary<Type, XmlSerializer> XmlSerializers = new();
+
+    private readonly JsonSerializerOptions _jsonOptions;
+
+    public SerializationHelper(JsonSerializerOptions? jsonOptions = null)
     {
-        /// <summary>
-        /// Concurrency Locking Object.
-        /// </summary>
-        protected static readonly object _ConcurrencyLock = new object();
+        // If caller doesn't supply options, use Web defaults (camelCase, etc.)
+        // Caller should typically pass options with your converters registered.
+        _jsonOptions = jsonOptions ?? new JsonSerializerOptions(JsonSerializerDefaults.Web);
+    }
 
-        /// <summary>
-        /// Holds the current active singleton object.
-        /// </summary>
-        private static volatile TI _Current;
+    private static XmlSerializer GetXmlSerializer(Type type)
+        => XmlSerializers.GetOrAdd(type, static t => new XmlSerializer(t));
 
-        /// <summary>
-        /// Gets or sets the Singleton Current Static Property.
-        /// </summary>
-        public static TI Current
+    // ---------------------------
+    // Deserialize
+    // ---------------------------
+
+    public ValueTask<T?> DeserializeAsync<T>(string data, SerializationTypes serializationType = SerializationTypes.Json)
+        where T : class
+        => ValueTask.FromResult(Deserialize<T>(data, serializationType));
+
+    public T? Deserialize<T>(string data, SerializationTypes serializationType = SerializationTypes.Json)
+        where T : class
+    {
+        if (data is null)
+            throw new ArgumentNullException(nameof(data));
+
+        return serializationType switch
         {
-            get
-            {
-                if (_Current == null)
-                {
-                    lock (_ConcurrencyLock)
-                    {
-                        if (_Current == null)
-                        {
-                            _Current = new T();
-                        }
-                    }
-                }
+            SerializationTypes.Xml => FromXml<T>(data),
+            SerializationTypes.Json => JsonSerializer.Deserialize<T>(data, _jsonOptions),
+            _ => throw new ArgumentOutOfRangeException(nameof(serializationType), serializationType, "Unknown serialization type.")
+        };
+    }
 
-                return _Current;
-            }
-            set
-            {
-                lock (_ConcurrencyLock)
-                {
-                    _Current = value;
-                }
-            }
+    public bool TryDeserialize<T>(string data, SerializationTypes serializationType, out T? result)
+        where T : class
+    {
+        try
+        {
+            result = Deserialize<T>(data, serializationType);
+            return result is not null;
+        }
+        catch
+        {
+            result = null;
+            return false;
         }
     }
-    public class SerializationHelper : InterfacedSingletonBase<SerializationHelper,ISerializationHelper>, ISerializationHelper
+
+    // ---------------------------
+    // XML
+    // ---------------------------
+
+    public string ToXml(object? obj) => Serialize(obj, SerializationTypes.Xml);
+
+    public ValueTask<string> ToXmlAsync(object? obj)
+        => ValueTask.FromResult(ToXml(obj));
+
+    public T? FromXml<T>(string xml) where T : class
     {
-        #region XmlSerializer Cache
+        if (xml is null)
+            throw new ArgumentNullException(nameof(xml));
 
-        private static readonly Dictionary<Type, XmlSerializer> Serializers = new Dictionary<Type, XmlSerializer>();
-        private static readonly object SerializerLock = new object();
+        // For empty XML, return null rather than throwing.
+        if (string.IsNullOrWhiteSpace(xml))
+            return null;
 
-        private XmlSerializer GetXmlSerializer(Type type)
+        using var reader = new StringReader(xml);
+        var serializer = GetXmlSerializer(typeof(T));
+
+        var deserialized = serializer.Deserialize(reader);
+        return deserialized as T;
+    }
+
+    public ValueTask<T?> FromXmlAsync<T>(string xml) where T : class
+        => ValueTask.FromResult(FromXml<T>(xml));
+
+    // ---------------------------
+    // Serialize
+    // ---------------------------
+
+    public string Serialize(object? obj, SerializationTypes serializationType = SerializationTypes.Json)
+    {
+        return serializationType switch
         {
-            XmlSerializer serializer;
+            SerializationTypes.Xml => SerializeToXml(obj),
+            SerializationTypes.Json => JsonSerializer.Serialize(obj, _jsonOptions),
+            _ => throw new ArgumentOutOfRangeException(nameof(serializationType), serializationType, "Unknown serialization type.")
+        };
+    }
 
-            lock (SerializerLock)
-            {
-                if (Serializers.ContainsKey(type))
-                {
-                    serializer = Serializers[type];
-                }
-                else
-                {
+    public ValueTask<string> SerializeAsync(object? obj, SerializationTypes serializationType = SerializationTypes.Json)
+        => ValueTask.FromResult(Serialize(obj, serializationType));
 
-                    if (Serializers.ContainsKey(type))
-                        serializer = Serializers[type];
-                    else
-                    {
-                        serializer = new XmlSerializer(type);
-                        Serializers.Add(type, serializer);
-                    }
-                }
-            }
+    private static string SerializeToXml(object? obj)
+    {
+        if (obj is null)
+            return string.Empty;
 
-            return serializer;
-        }
+        using var stringWriter = new StringWriter();
 
-        #endregion
-
-        /// <summary>
-        /// De-serializes a string into an instance of the object.
-        /// </summary>
-        /// <param name="data">The string containing the object data.</param>
-        /// <param name="serializationType">The type of de-serialization to perform on the string.</param>
-        /// <returns>The object created from the passed in string.</returns>
-        public async Task<T> DeserializeAsync<T>(string data,
-            SerializationTypes serializationType = SerializationTypes.Json) where T : class, new()
+        var xmlWriterSettings = new XmlWriterSettings
         {
-            switch (serializationType)
-            {
-                case SerializationTypes.Xml:
-                    return await Task.Factory.StartNew(() => FromXml<T>(data));
+            Indent = false,
+            NewLineHandling = NewLineHandling.None,
+            OmitXmlDeclaration = true
+        };
 
-                case SerializationTypes.Json:
-                    return await Task.Factory.StartNew(() => JsonConvert.DeserializeObject<T>(data));
+        var nameSpace = new XmlSerializerNamespaces();
+        nameSpace.Add(string.Empty, string.Empty);
 
-                default:
-                    throw new ArgumentOutOfRangeException("serializationType");
-            }
-        }
+        using var xmlWriter = XmlWriter.Create(stringWriter, xmlWriterSettings);
 
-        /// <summary>
-        /// De-serializes a string into an instance of the object asynchronously.
-        /// </summary>
-        /// <param name="data">The string containing the object data.</param>
-        /// <param name="serializationType">The type of de-serialization to perform on the string.</param>
-        /// <returns>The object created from the passed in string.</returns>
-        public T Deserialize<T>(string data, SerializationTypes serializationType = SerializationTypes.Json)
-            where T : class, new()
-        {
-            switch (serializationType)
-            {
-                case SerializationTypes.Xml:
-                    return FromXml<T>(data);
+        var xmlSerializer = GetXmlSerializer(obj.GetType());
+        xmlSerializer.Serialize(xmlWriter, obj, nameSpace);
 
-                case SerializationTypes.Json:
-                    return JsonConvert.DeserializeObject<T>(data);
-
-                default:
-                    throw new ArgumentOutOfRangeException("serializationType");
-            }
-        }
-
-        /// <summary>
-        /// Trys to de-serializes a string into an instance of the object.
-        /// </summary>
-        /// <param name="data">The string containing the object data.</param>
-        /// <param name="serializationType">The type of de-serialization to perform on the string.</param>
-        /// <param name="result">The serialized object or null if the string can't be serialized.</param>
-        /// <returns>True if the string can be serialized, otherwise false.</returns>
-        public bool TryDeserialize<T>(string data, SerializationTypes serializationType, out T result)
-            where T : class, new()
-        {
-            try
-            {
-                result = Deserialize<T>(data, serializationType);
-                return true;
-            }
-            catch
-            {
-                result = null;
-                return false;
-            }
-
-        }
-
-
-        /// <summary>
-        /// The most basic serialization of an object into an XML string.
-        /// </summary>
-        /// <returns>An XML string representing the object.</returns>
-        public string ToXml(object obj)
-        {
-            return Serialize(obj, SerializationTypes.Xml);
-        }
-
-        /// <summary>
-        /// The most basic serialization of an object into an XML string asynchronously.
-        /// </summary>
-        /// <returns>An XML string representing the object.</returns>
-        public async Task<string> ToXmlAsync(object obj)
-        {
-            return await Task.Factory.StartNew(() => ToXml(obj));
-        }
-
-        /// <summary>
-        /// The most basic de-serialization of an XML string into an object.
-        /// </summary>
-        /// <param name="xml">The XML string containing the object data.</param>
-        /// <returns>The object created from the passed in XML string.</returns>
-        public T FromXml<T>(string xml) where T : class, new()
-        {
-            using (TextReader reader = new StringReader(xml))
-            {
-                var serializer = GetXmlSerializer(typeof (T));
-                return (T) serializer.Deserialize(reader);
-            }
-        }
-
-        /// <summary>
-        /// The most basic de-serialization of an XML string into an object asynchronously.
-        /// </summary>
-        /// <param name="xml">The XML string containing the object data.</param>
-        /// <returns>The object created from the passed in XML string.</returns>
-        public async Task<T> FromXmlAsync<T>(string xml) where T : class, new()
-        {
-            return await Task.Factory.StartNew(() => FromXml<T>(xml));
-        }
-
- 
- 
-
-        /// <summary>
-        /// Serializes the object into a string.
-        /// </summary>
-        /// <param name="obj">Object to serialize</param>
-        /// <param name="serializationType">The type of serialization to perform on the object.</param>
-        /// <returns>A string representing the object.</returns>
-        public string Serialize(object obj, SerializationTypes serializationType)
-        {
-            switch (serializationType)
-            {
-                case SerializationTypes.Xml:
-                    return SerializeToXml(obj);
-
-                case SerializationTypes.Json:
-                    return JsonConvert.SerializeObject(obj);
-
-                default:
-                    throw new ArgumentOutOfRangeException("serializationType");
-            }
-        }
-        /// <summary>
-        /// Serializes the object into a string asynchronously.
-        /// </summary>
-        /// <param name="obj">Object to serialize</param>
-        /// <param name="serializationType">The type of serialization to perform on the object asynchronously.</param>
-        /// <returns>A string representing the object.</returns>
-        public async Task<string> SerializeAsync(object obj, SerializationTypes serializationType)
-        {
-            switch (serializationType)
-            {
-                case SerializationTypes.Xml:
-                    return await Task.Factory.StartNew(() => SerializeToXml(obj));
-
-                case SerializationTypes.Json:
-                    return await Task.Factory.StartNew(() => JsonConvert.SerializeObject(obj));
-
-                default:
-                    throw new ArgumentOutOfRangeException("serializationType");
-            }
-        }
-
-        /// <summary>
-        /// Performs the Serialization of the object to an XML string.
-        /// </summary>
-        /// <returns>An XML string representing the object.</returns>
-        private string SerializeToXml(object obj)
-        {
-            if (obj == null)
-            {
-                return string.Empty;
-            }
-
-            using (var stringWriter = new StringWriter())
-            {
-                var xmlWriterSettings = new XmlWriterSettings
-                {
-                    Indent = false,
-                    NewLineHandling = NewLineHandling.None,
-                    OmitXmlDeclaration = true
-                };
-
-                var nameSpace = new XmlSerializerNamespaces();
-                nameSpace.Add(string.Empty, string.Empty);
-
-                using (var xmlWriter = XmlWriter.Create(stringWriter, xmlWriterSettings))
-                {
-
-                    var xmlSerializer = GetXmlSerializer(obj.GetType());
-                    xmlSerializer.Serialize(xmlWriter, obj, nameSpace);
-
-                    return stringWriter.ToString();
-                }
-            }
-        }
-
-        /// <summary>
-        /// Performs the Serialization of the object to an XML string.
-        /// </summary>
-        /// <returns>An XML string representing the object.</returns>
-        private async Task<string> SerializeToXmlAsync(object obj)
-        {
-            if (obj == null)
-            {
-                return await Task.Factory.StartNew(() => string.Empty);//(return ));
-            }
-            return await Task.Factory.StartNew(() =>
-            {
-                using (var stringWriter = new StringWriter())
-                {
-                    var xmlWriterSettings = new XmlWriterSettings
-                    {
-                        Indent = false,
-                        NewLineHandling = NewLineHandling.None,
-                        OmitXmlDeclaration = true
-                    };
-
-                    var nameSpace = new XmlSerializerNamespaces();
-                    nameSpace.Add(string.Empty, string.Empty);
-
-                    using (var xmlWriter = XmlWriter.Create(stringWriter, xmlWriterSettings))
-                    {
-
-                        var xmlSerializer = GetXmlSerializer(obj.GetType());
-                        xmlSerializer.Serialize(xmlWriter, obj, nameSpace);
-
-                        return stringWriter.ToString();
-                    }
-                }
-            });
-
-        }
- 
-      
+        return stringWriter.ToString();
     }
 }
