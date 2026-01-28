@@ -14,4 +14,8 @@
 		<RepositoryType>git</RepositoryType>
 		<PackageId>PolyhydraGames.RetroAchievement.Cheevos</PackageId>
 	</PropertyGroup>
+
+	<ItemGroup>
+	  <PackageReference Update="SonarAnalyzer.CSharp" Version="10.18.0.131500" />
+	</ItemGroup>
 </Project>

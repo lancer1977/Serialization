@@ -15,7 +15,7 @@ namespace PolyhydraGames.Core.Serialization
         /// <param name="data">The string containing the object data.</param>
         /// <param name="serializationType">The type of de-serialization to perform on the string.</param>
         /// <returns>The object created from the passed in string.</returns>
-        Task<T> DeserializeAsync<T>(string data, SerializationTypes serializationType = SerializationTypes.Json) where T : class, new();
+        ValueTask<T> DeserializeAsync<T>(string data, SerializationTypes serializationType = SerializationTypes.Json) where T : class, new();
 
         /// <summary>
         /// Trys to de-serializes a string into an instance of the object.
@@ -36,7 +36,7 @@ namespace PolyhydraGames.Core.Serialization
         /// </summary>
         /// <returns>An XML string representing the object.</returns>
 
-        Task<string> ToXmlAsync(object obj);
+        ValueTask<string> ToXmlAsync(object obj);
         /// <summary>
         /// The most basic de-serialization of an XML string into an object.
         /// </summary>
@@ -48,7 +48,7 @@ namespace PolyhydraGames.Core.Serialization
         /// </summary>
         /// <param name="xml">The XML string containing the object data.</param>
         /// <returns>The object created from the passed in XML string.</returns>
-        Task<T> FromXmlAsync<T>(string xml) where T : class, new();
+        ValueTask<T> FromXmlAsync<T>(string xml) where T : class, new();
 
         /// <summary>
         /// Serializes the object into a string.
@@ -64,6 +64,6 @@ namespace PolyhydraGames.Core.Serialization
         /// <param name="obj">Object to serialize</param>
         /// <param name="serializationType">The type of serialization to perform on the object asynchronously.</param>
         /// <returns>A string representing the object.</returns>
-        Task<string> SerializeAsync(object obj, SerializationTypes serializationType);
+        ValueTask<string> SerializeAsync(object obj, SerializationTypes serializationType);
     }
 }

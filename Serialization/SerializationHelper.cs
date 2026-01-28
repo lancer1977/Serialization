@@ -12,36 +12,7 @@ using System.Xml;
 using System.Xml.Serialization;
 
 namespace PolyhydraGames.Core.Serialization;
-
-public interface ISerializationHelper
-{
-    ValueTask<T?> DeserializeAsync<T>(string data, SerializationTypes serializationType = SerializationTypes.Json)
-        where T : class;
-
-    T? Deserialize<T>(string data, SerializationTypes serializationType = SerializationTypes.Json)
-        where T : class;
-
-    bool TryDeserialize<T>(string data, SerializationTypes serializationType, out T? result)
-        where T : class;
-
-    ValueTask<string> SerializeAsync(object? obj, SerializationTypes serializationType = SerializationTypes.Json);
-
-    string Serialize(object? obj, SerializationTypes serializationType = SerializationTypes.Json);
-
-    string ToXml(object? obj);
-
-    ValueTask<string> ToXmlAsync(object? obj);
-
-    T? FromXml<T>(string xml) where T : class;
-
-    ValueTask<T?> FromXmlAsync<T>(string xml) where T : class;
-}
-
-public enum SerializationTypes
-{
-    Json,
-    Xml
-}
+ 
 
 /// <summary>
 /// Serialization helper for JSON and XML.
@@ -71,12 +42,12 @@ public sealed class SerializationHelper : ISerializationHelper
     // Deserialize
     // ---------------------------
 
-    public ValueTask<T?> DeserializeAsync<T>(string data, SerializationTypes serializationType = SerializationTypes.Json)
-        where T : class
-        => ValueTask.FromResult(Deserialize<T>(data, serializationType));
+    public ValueTask<T> DeserializeAsync<T>(string data, SerializationTypes serializationType = SerializationTypes.Json) where T : class, new()
+    {
+        return ValueTask.FromResult(Deserialize<T>(data, serializationType))!;
+    }
 
-    public T? Deserialize<T>(string data, SerializationTypes serializationType = SerializationTypes.Json)
-        where T : class
+    public T? Deserialize<T>(string data, SerializationTypes serializationType = SerializationTypes.Json) where T : class, new()
     {
         if (data is null)
             throw new ArgumentNullException(nameof(data));
@@ -89,8 +60,7 @@ public sealed class SerializationHelper : ISerializationHelper
         };
     }
 
-    public bool TryDeserialize<T>(string data, SerializationTypes serializationType, out T? result)
-        where T : class
+    public bool TryDeserialize<T>(string data, SerializationTypes serializationType, out T? result) where T : class, new()
     {
         try
         {
@@ -113,7 +83,7 @@ public sealed class SerializationHelper : ISerializationHelper
     public ValueTask<string> ToXmlAsync(object? obj)
         => ValueTask.FromResult(ToXml(obj));
 
-    public T? FromXml<T>(string xml) where T : class
+    public T? FromXml<T>(string xml) where T : class, new()
     {
         if (xml is null)
             throw new ArgumentNullException(nameof(xml));
@@ -129,8 +99,7 @@ public sealed class SerializationHelper : ISerializationHelper
         return deserialized as T;
     }
 
-    public ValueTask<T?> FromXmlAsync<T>(string xml) where T : class
-        => ValueTask.FromResult(FromXml<T>(xml));
+    public ValueTask<T?> FromXmlAsync<T>(string xml) where T : class, new() => ValueTask.FromResult(FromXml<T>(xml));
 
     // ---------------------------
     // Serialize
